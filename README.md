@@ -7,3 +7,4 @@ python is new to me and so is working with most physical hardware like microcont
 
 ### credits and libraries?
 - [micropython-ssd1322 by rdagger](https://github.com/rdagger/micropython-ssd1322)
+- [lyriq by tn3w](https://github.com/tn3w/lyriq)
