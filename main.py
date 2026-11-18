@@ -1,19 +1,45 @@
 import os
 import sys
 import time
+import requests
 
 # Prefer the package source directory when running from this workspace.
-lyriq_source = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lyriq")
-if os.path.isdir(lyriq_source) and lyriq_source not in sys.path:
-    sys.path.insert(0, lyriq_source)
+lib_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+if os.path.isdir(lib_dir) and lib_dir not in sys.path:
+    sys.path.insert(0, lib_dir)
+
 
 # import lyriq library for getting lyrics
 from lyriq import get_lyrics
 
+# navidrome api stuff???
+url = "https://navidrome.big-gay.party/rest/"
+params = {
+    "u": "LunarConstruct",
+    "p": "Childrenofdust7!",
+    "v": "1.16.1",
+    "c": "lyric-hud",
+    "f": "json",
+}
+
+nowplaying = requests.get(f"{url}getNowPlaying", params=params)
+nowplaying_data = nowplaying.json()
+
+entries = nowplaying_data.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
+
+if entries:
+    current_track = entries[0]
+    song_name = current_track.get("title")
+    artist_name = current_track.get("artist")
+    print(f"Now playing: {song_name} by {artist_name}")
+else:
+    print("Nothing is currently playing.")
+
+
 # set the song and artist name for testing
 # manual for now but will eventually pull from navidrome/subsonic? or maybe symfonium directly if theres an api for it
-song_name = "Pay No Mind"
-artist_name = "Madeon"
+# song_name = "Music"
+# artist_name = "underscores"
 
 
 class TerminalDisplay:
@@ -71,8 +97,13 @@ def main():
     display = TerminalDisplay() if test_mode else create_hardware_display()
 
     # retrieve the lyrics !!!
+    # if subsonic_lyrics:
+    #     lyrics = subsonic_lyrics
+    #     lyrics_text = subsonic_lyrics_data
+    # else:
     lyrics = get_lyrics(song_name, artist_name)
     lyrics_text = lyrics.plain_lyrics if lyrics else "lyrics not found :("
+    
 
     # Check if we have synchronized lyrics, and if we dont?
     if not lyrics.synced_lyrics:
@@ -109,10 +140,17 @@ def main():
 
         minutes = int(time_sec // 60)
         seconds = time_sec % 60
-        print(f"{line}")
+        display.draw_text8x8(0, 0, f"{line}", gs=15)
+        display.present()
         last_time = time_sec
-
-    print(f"that was {song_name} by {artist_name}!")
+        if not requests.get(f"{url}getNowPlaying", params=params).json().get("subsonic-response", {}).get("nowPlaying", {}).get("entry", []):
+            still_listening = False
+        else:
+            still_listening = True
+        if not still_listening:
+            display.draw_text8x8(0, 0, "-- music stopped --", gs=15)
+            display.present()
+            break
 
 
 if __name__ == "__main__":
