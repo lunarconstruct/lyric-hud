@@ -21,3 +21,4 @@ plans are for this to be built with:
 #### credits and libraries?
 - [micropython-ssd1322 by rdagger](https://github.com/rdagger/micropython-ssd1322)
 - [lyriq by tn3w](https://github.com/tn3w/lyriq)
+- [pykakasi by miurahr](https://github.com/miurahr/pykakasi)

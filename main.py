@@ -1,54 +1,21 @@
 import os
 import sys
-import time
-import datetime
-import requests
-from bisect import bisect_right
-
 # Prefer the package source directory when running from this workspace.
 lib_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 if os.path.isdir(lib_dir) and lib_dir not in sys.path:
     sys.path.insert(0, lib_dir)
 
-
-# import lyriq library for getting lyrics
-from lyriq import get_lyrics
-
-# navidrome api stuff???
-url = "https://navidrome.big-gay.party/rest/"
-params = {
-    "u": "LunarConstruct",
-    "p": "Childrenofdust7!",
-    "v": "1.16.1",
-    "c": "lyric-hud",
-    "f": "json",
-}
-
-nowplaying = requests.get(f"{url}getNowPlaying", params=params)
-nowplaying_data = nowplaying.json()
-
-entries = nowplaying_data.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
-
-if entries:
-    current_track = entries[0]
-    song_name = current_track.get("title")
-    artist_name = current_track.get("artist")
-
-    # figure out current position
-    position_ms = current_track.get("positionMs", 0)
-    position = datetime.timedelta(milliseconds=position_ms)
-
-    total_seconds, milliseconds = divmod(position_ms, 1000) # split total milliseconds into total seconds and remaining milliseconds
-    minutes, seconds = divmod(total_seconds, 60) # split total seconds into minutes and remaining seconds
-
-    # print song info
-    print(f"Now playing: {song_name} by {artist_name}")
-    print(f"position: {minutes:02d}:{seconds:02d}.{milliseconds:03d}")
-
-else:
-    print("Nothing is currently playing.")
+import time
+import datetime
+import requests
+import pykakasi
+from bisect import bisect_right
+from lyriq import get_lyrics, Lyrics
 
 
+
+# define the displays (terminal and oled)
+# terminal
 class TerminalDisplay:
     """for displaying the lyrics in the terminal instead of the display, for testing"""
 
@@ -60,7 +27,7 @@ class TerminalDisplay:
     def present(self):
         pass
 
-
+# oled
 def create_hardware_display():
     """Create the SPI/display objects used on the MicroPython device."""
     lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
@@ -88,7 +55,19 @@ def create_hardware_display():
         height=64,
     )
 
-# here's the main shebang
+
+
+
+# navidrome api stuff???
+url = "https://navidrome.big-gay.party/rest/"
+params = {
+    "u": "LunarConstruct",
+    "p": "Childrenofdust7!",
+    "v": "1.16.1",
+    "c": "lyric-hud",
+    "f": "json",
+}
+
 def main():
     # check if we're in test mode
     test_mode = "--test" in sys.argv 
@@ -103,64 +82,153 @@ def main():
     # create the display object, either for the terminal or for the hardware
     display = TerminalDisplay() if test_mode else create_hardware_display()
 
-    # retrieve the lyrics !!!
-    lyrics = get_lyrics(song_name, artist_name)
-    lyrics_text = lyrics.plain_lyrics if lyrics else "lyrics not found :("
-    
+    current_track_id = None
 
-    # Check if we have synchronized lyrics, and if we dont?
-    if not lyrics.synced_lyrics:
-        display.draw_text8x8(0, 0, "No synchronized lyrics available for this song.", gs=15)
-        display.present()
+    while True:
+        try:
+            # 1. Poll Subsonic for the active track
+            resp = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
+            entries = resp.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
 
-        # display the plaintext lyrics
-        display.draw_text8x8(0, 0, lyrics_text, gs=15)
-        display.present()
-        sys.exit(1)
+            # 2. If nothing is playing, show idle screen and wait 2 seconds before checking again
+            if not entries:
+                if current_track_id is not None:
+                    display.draw_text8x8(0, 0, "-- music stopped --", gs=15)
+                    display.present()
+                    current_track_id = None
+                time.sleep(2)
+                continue
 
-    # Get timestamps and lyrics sorted by time
-    timed_lyrics = []
-    for timestamp, line in lyrics.lyrics.items():
-        if ":" in timestamp:
-            minutes, seconds = timestamp.split(":")
-            total_seconds = float(minutes) * 60 + float(seconds)
-            timed_lyrics.append((total_seconds, line))
+            track = entries[0]
+            track_id = track.get("id")
+            position_ms = track.get("positionMs", 0)
+            
+            # Anchor the clock immediately upon receiving the API response
+            song_start_time = time.monotonic() - (position_ms / 1000.0)
 
-    timed_lyrics.sort()  # Sort by timestamp
+            # 3. Only fetch and parse lyrics when a NEW song starts
+            if track_id != current_track_id:
+                current_track_id = track_id
+                song_name = track.get("title", "Unknown")
+                artist_name = track.get("artist", "Unknown")
+                                
+                # retrieve the lyrics !!!
+                getsubsoniclyrics = requests.get(f"{url}getLyricsBySongId?id={track_id}", params=params, timeout=5).json()
 
-    current_pos_sec = position_ms / 1000.0
-    index = bisect_right(timed_lyrics, current_pos_sec, key=lambda x: x[0]) - 1
+                subsonic_lyrics = (
+                    getsubsoniclyrics.get("subsonic-response", {})
+                    .get("lyricsList", {})
+                    .get("structuredLyrics", [])
+                )
 
-    # Start at the active lyric (or 0 if the song hasn't reached the first lyric yet)
-    start_index = max(0, index)
-    song_start_time = time.monotonic() - current_pos_sec
-    last_time = current_pos_sec
+                lyrics_lang = (
+                    subsonic_lyrics[0]
+                    .get("lang", [])
+                )
 
-    for time_sec, line in timed_lyrics[start_index:]:
-        # Check how far into the song we actually are right now
-        elapsed = time.monotonic() - song_start_time
-        wait_time = time_sec - elapsed
+                display.draw_text8x8(0, 0, f"{song_name} - {artist_name}", gs=15)
+                display.present()
 
-        # Only sleep for the remaining time (automatically skips if behind or already active)
-        if wait_time > 0:
-            time.sleep(wait_time)
+                if subsonic_lyrics:
+                    print(f"lyrics pulled from navidrome | language: {lyrics_lang}")
+                    print("------------------------")
+                    lyric_track = subsonic_lyrics[0]
+                    lines = lyric_track.get("line", [])
+                    
+                    if lyric_track.get("synced"):
+                        # Convert Navidrome milliseconds into [mm:ss.xx] LRC format
+                        lrc_lines = []
+                        for line in lines:
+                            ms = line.get("start", 0)
+                            minutes = ms // 60000
+                            seconds = (ms % 60000) / 1000.0
+                            lrc_lines.append(f"[{minutes:02d}:{seconds:05.2f}] {line.get('value', '')}")
+                        
+                        lrc_string = "\n".join(lrc_lines)
+                        lyrics = Lyrics.from_lrc_string(lrc_string, none_char="♪")
+                        lyrics_text = lyrics.plain_lyrics
+                    else:
+                        # Handle unsynced lyrics directly as plain text
+                        lyrics = None
+                        lyrics_text = "\n".join(line.get("value", "") for line in lines)
+                else:
+                    print("subsonic doesnt have lyrics, pulling from lrclib")
+                    lyrics = get_lyrics(song_name, artist_name)
+                    lyrics_text = lyrics.plain_lyrics if lyrics else "lyrics not found :("
+                
+                
+                
+                # Check if we have synchronized lyrics, and if we dont?
+                if not lyrics.synced_lyrics:
+                    display.draw_text8x8(0, 0, "No synchronized lyrics available for this song.", gs=15)
+                    display.present()
 
-        display.draw_text8x8(0, 0, f"{line}", gs=15)
-        display.present()
+                    # display the plaintext lyrics
+                    display.draw_text8x8(0, 0, lyrics_text, gs=15)
+                    display.present()
+                    sys.exit(1)
 
-        # Poll Subsonic API (any network delay here is absorbed by the next elapsed calculation)
-        now_playing = (
-            requests.get(f"{url}getNowPlaying", params=params)
-            .json()
-            .get("subsonic-response", {})
-            .get("nowPlaying", {})
-            .get("entry", [])
-        )
-        if not now_playing:
-            display.draw_text8x8(0, 0, "-- music stopped --", gs=15)
-            display.present()
-            break
-    
+                # Get timestamps and lyrics sorted by time
+                timed_lyrics = []
+                for timestamp, line in lyrics.lyrics.items():
+                    if ":" in timestamp:
+                        minutes, seconds = timestamp.split(":")
+                        total_seconds = float(minutes) * 60 + float(seconds)
+                        timed_lyrics.append((total_seconds, line))
+
+                timed_lyrics.sort()  # Sort by timestamp
+
+            # 4. Play through the lyrics for the current song
+            current_pos_sec = time.monotonic() - song_start_time
+            start_index = max(0, bisect_right(timed_lyrics, current_pos_sec, key=lambda x: x[0]) - 1)
+            kks = pykakasi.kakasi()
+            prevline = None
+
+            for time_sec, line in timed_lyrics[start_index:]:
+                wait_time = time_sec - (time.monotonic() - song_start_time)
+                if wait_time > 0:
+                    time.sleep(wait_time)
+
+                # set desired lyrics format (‘orig’, ‘kana’, ‘hira’, ‘hepburn’, ‘kunrei’, ‘passport’, 'none')
+                line1_format = 'orig'
+                line2_format = 'hepburn'
+
+                kksresult = kks.convert(line)
+                line1 = " ".join(item[line1_format] for item in kksresult)
+                line2 = " ".join(item[line2_format] for item in kksresult)
+
+                if not prevline == kksresult:
+                    display.draw_text8x8(0, 0, line1, gs=15)
+                    display.draw_text8x8(0, 0, line2, gs=15)
+                    display.present()
+
+                # Check if the song was skipped, changed, or stopped mid-playback
+                poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
+                active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
+                
+                # Break out to the outer loop if playback stopped OR the track ID changed
+                if not active_entries or active_entries[0].get("id") != current_track_id:
+                    break
+
+            else:
+                # Using `for ... else` ensures this ONLY runs if the song wasn't skipped early
+                while True:
+                    time.sleep(1)
+                    poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
+                    active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
+                    
+                    # Finally break out to the main outer loop when the track changes or stops
+                    if not active_entries or active_entries[0].get("id") != current_track_id:
+                        break
+
+            # Brief pause at the end of a song before polling for the next track
+            time.sleep(1)
+            prevline = kksresult
+
+        except Exception as e:
+            print(f"Polling error: {e}")
+            time.sleep(3)
+        
 
 
 if __name__ == "__main__":
