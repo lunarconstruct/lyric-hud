@@ -132,7 +132,9 @@ def _normalize_name(name: str) -> str:
 def _json_get(url: str) -> Dict:
     """Make a GET request and return the JSON response."""
     req = urllib.request.Request(
-        url, headers={"User-Agent": f"Lyriq v{__version__} ({__url__})"}
+        url, headers={
+            "User-Agent": f"Lyriq v{__version__} ({__url__})",
+            "Lrclib-App-Id": "8zBD0KZbaljoZSn2CjPamjCQuASX-PHhU06Kp_k1x1s",}
     )
     try:
         with urllib.request.urlopen(req) as response:

@@ -1,7 +1,9 @@
 import os
 import sys
 import time
+import datetime
 import requests
+from bisect import bisect_right
 
 # Prefer the package source directory when running from this workspace.
 lib_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
@@ -31,15 +33,20 @@ if entries:
     current_track = entries[0]
     song_name = current_track.get("title")
     artist_name = current_track.get("artist")
+
+    # figure out current position
+    position_ms = current_track.get("positionMs", 0)
+    position = datetime.timedelta(milliseconds=position_ms)
+
+    total_seconds, milliseconds = divmod(position_ms, 1000) # split total milliseconds into total seconds and remaining milliseconds
+    minutes, seconds = divmod(total_seconds, 60) # split total seconds into minutes and remaining seconds
+
+    # print song info
     print(f"Now playing: {song_name} by {artist_name}")
+    print(f"position: {minutes:02d}:{seconds:02d}.{milliseconds:03d}")
+
 else:
     print("Nothing is currently playing.")
-
-
-# set the song and artist name for testing
-# manual for now but will eventually pull from navidrome/subsonic? or maybe symfonium directly if theres an api for it
-# song_name = "Music"
-# artist_name = "underscores"
 
 
 class TerminalDisplay:
@@ -48,7 +55,7 @@ class TerminalDisplay:
     # looks like it specifically overwrites the functions for drawing text in the micropython display library
     # so we can use the same code on both the terminal and micropython/OLED display
     def draw_text8x8(self, x, y, text, gs=15):
-        print(f"[display at {x},{y}, gs={gs}]\n{text}")
+        print(text)
 
     def present(self):
         pass
@@ -97,10 +104,6 @@ def main():
     display = TerminalDisplay() if test_mode else create_hardware_display()
 
     # retrieve the lyrics !!!
-    # if subsonic_lyrics:
-    #     lyrics = subsonic_lyrics
-    #     lyrics_text = subsonic_lyrics_data
-    # else:
     lyrics = get_lyrics(song_name, artist_name)
     lyrics_text = lyrics.plain_lyrics if lyrics else "lyrics not found :("
     
@@ -115,9 +118,6 @@ def main():
         display.present()
         sys.exit(1)
 
-    display.draw_text8x8(0, 0, f"Found synchronized lyrics for '{lyrics.track_name}' by {lyrics.artist_name}", gs=15)
-    display.present()
-
     # Get timestamps and lyrics sorted by time
     timed_lyrics = []
     for timestamp, line in lyrics.lyrics.items():
@@ -128,29 +128,39 @@ def main():
 
     timed_lyrics.sort()  # Sort by timestamp
 
-    last_time = 0
-    for i, (time_sec, line) in enumerate(timed_lyrics):
-        # wait until first lyric starts
-        if i == 0:
-            time.sleep(time_sec)
-        # for each subsequent lyric, wait for the difference in time from the last lyric
-        if i > 0:
-            wait_time = time_sec - last_time
+    current_pos_sec = position_ms / 1000.0
+    index = bisect_right(timed_lyrics, current_pos_sec, key=lambda x: x[0]) - 1
+
+    # Start at the active lyric (or 0 if the song hasn't reached the first lyric yet)
+    start_index = max(0, index)
+    song_start_time = time.monotonic() - current_pos_sec
+    last_time = current_pos_sec
+
+    for time_sec, line in timed_lyrics[start_index:]:
+        # Check how far into the song we actually are right now
+        elapsed = time.monotonic() - song_start_time
+        wait_time = time_sec - elapsed
+
+        # Only sleep for the remaining time (automatically skips if behind or already active)
+        if wait_time > 0:
             time.sleep(wait_time)
 
-        minutes = int(time_sec // 60)
-        seconds = time_sec % 60
         display.draw_text8x8(0, 0, f"{line}", gs=15)
         display.present()
-        last_time = time_sec
-        if not requests.get(f"{url}getNowPlaying", params=params).json().get("subsonic-response", {}).get("nowPlaying", {}).get("entry", []):
-            still_listening = False
-        else:
-            still_listening = True
-        if not still_listening:
+
+        # Poll Subsonic API (any network delay here is absorbed by the next elapsed calculation)
+        now_playing = (
+            requests.get(f"{url}getNowPlaying", params=params)
+            .json()
+            .get("subsonic-response", {})
+            .get("nowPlaying", {})
+            .get("entry", [])
+        )
+        if not now_playing:
             display.draw_text8x8(0, 0, "-- music stopped --", gs=15)
             display.present()
             break
+    
 
 
 if __name__ == "__main__":
