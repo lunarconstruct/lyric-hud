@@ -60,13 +60,8 @@ def create_hardware_display():
 
 # navidrome api stuff???
 url = "https://navidrome.big-gay.party/rest/"
-params = {
-    "u": "LunarConstruct",
-    "p": "Childrenofdust7!",
-    "v": "1.16.1",
-    "c": "lyric-hud",
-    "f": "json",
-}
+import credentials
+params = credentials.params
 
 def main():
     # check if we're in test mode
