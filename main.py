@@ -2,9 +2,11 @@
 import sys # used to check if we're running on a MicroPython device or not, and to import the machine module if we are
 import time # used to sleep between polling the navidrome api for the current track and lyrics
 import requests # used to make HTTP requests to the navidrome api to get the current track and lyrics
+import yaml # to read yaml config files
+from types import SimpleNamespace
 
 ## third-party libraries
-from pykakasi import kakasi as kks # used to convert Japanese lyrics into romaji/kana/hiragana
+import pykakasi # used to convert Japanese lyrics into romaji/kana/hiragana
 from bisect import bisect_right # used to find the index of the current lyric line based on the current playback time
 from lib.lyriq import get_lyrics, Lyrics # used to fetch lyrics from the lrclib and parse them into a Lyrics object
 from langdetect import detect # used to detect the language of the lyrics
@@ -12,7 +14,11 @@ from langdetect import detect # used to detect the language of the lyrics
 ## my modules
 from displays import OLEDDisplay, TerminalDisplay # used to create the display object, either for the terminal or for the hardware
 from credentials import params, url # used to store the navidrome api credentials and url
-import settings # imports settings variables
+from functions import nav2lrc # uhhh ya
+
+# import settings from settings.yaml
+with open("settings.yaml", "r", encoding="utf-8") as f:
+    settings = SimpleNamespace(**yaml.safe_load(f))
 
 # o kaaaayyyyy imports done lets actually Do the Thing
 
@@ -33,6 +39,7 @@ def main():
 
     # initialize the current track ID to None so we can detect when a new song starts
     current_track_id = None
+    display.printText(0,0,"-- waiting for a song... --",gs=15)
 
     ### MAIN LOOP ###
     while True: # while true allows it to keep looping, since true is always true
@@ -47,10 +54,10 @@ def main():
             track = nowPlaying[0] # set the API response to the track variable
             track_id = track.get("id") # get the track's ID
             position_ms = track.get("positionMs", 0) # get the user's position in the song in milliseconds
-            isListening = track.get("state", []) # get the user's listening state (playing, paused, stopped, etc.)
+            isListening = track.get("state", []) # get the user's listening state (starting, playing, paused, or stopped)
 
             # based on the user's listening state, decide what to do next.
-            if isListening != "playing": # if the user is not currently listening,
+            if isListening == "paused" or isListening == "stopped": # if the user is not currently listening,
                 if current_track_id is not None: # if the user WAS listening but has now stopped,
                     display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
                     current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
@@ -62,7 +69,7 @@ def main():
             # if the track ID that gets pulled from the API is different from the current track ID,
             if track_id != current_track_id:
                 current_track_id = track_id # update the current track ID to the new track ID
-                display.printText(0, 0, "-- song changing... --", gs=15)
+                display.printText(0, 0, "-- loading next... --", gs=15)
                 song_name = track.get("title", "Unknown") # get the song name from the API response, "unknown" by default
                 artist_name = track.get("artist", "Unknown") # get the artist name from the API response, "unknown" by default
                                 
@@ -78,8 +85,9 @@ def main():
                 if subsonicLyrics:
                     # get lyric data from the API response and detect the language of the lyrics
                     lyric_track = subsonicLyrics[0]
-                    lyrics_lang = detect(lyric_track.get("line", [{}])[0].get("value", ""))
                     lines = lyric_track.get("line", [])
+                    lyrics_text = "\n".join(item.get("value", "") for item in lines)
+                    lyrics_lang = detect(lyrics_text)
 
                     # display the source of the lyrics and the detected language
                     display.printText(0, 0, f"lyrics provided by navidrome | language: {lyrics_lang}", gs=15)
@@ -87,28 +95,8 @@ def main():
 
                     # if there are synced lyrics
                     if lyric_track.get("synced"):
-
-                        # convert navidrome's lyric timestamps into .lrc format for the parser
-                        lrc_lines = [] # init a list for the lyrics to live in
-                        for line in lines:
-                            ms = line.get("start", 0)
-                            minutes = ms // 60000
-                            seconds = (ms % 60000) / 1000.0
-                            lrc_lines.append(f"[{minutes:02d}:{seconds:05.2f}] {line.get('value', '')}")
-
-                        # convert the list of lyrics into a single string for the parser
-                        lrc_string = "\n".join(lrc_lines)
-                        lyrics = Lyrics.from_lrc_string(lrc_string, none_char="♪") # set synced lyrics
-                        lyrics_text = lyrics.plain_lyrics # set plain text lyrics
-
-                        # put lyrics in time order for display during playback
-                        timed_lyrics = []
-                        for timestamp, line in lyrics.lyrics.items():
-                            if ":" in timestamp:
-                                minutes, seconds = timestamp.split(":")
-                                total_seconds = float(minutes) * 60 + float(seconds)
-                                timed_lyrics.append((total_seconds, line))
-                        timed_lyrics.sort()  # Sort by timestamp
+                        timed_lyrics, lyrics_text = nav2lrc(lines)
+                        nav2lrc(lines) # convert navidrome's lyric timestamps into .lrc format for the parser
 
                     else: # if there are no synced lyrics, just display the plain text lyrics
                         lyrics = None # set no synced lyrics
@@ -133,20 +121,26 @@ def main():
                     time.sleep(wait_time)
 
                 # convert lyrics writing system (kana, hiragana, etc) if the settings call for it
+                kks = pykakasi.kakasi()
                 kksresult = kks.convert(line)
-                line1 = " ".join(item[settings.line1_format] for item in kksresult)
-                line2 = " ".join(item[settings.line2_format] for item in kksresult)
+                line1 = " ".join(item[settings.line1_format] for item in kksresult) if settings.line1_format != "none" else ""
+                line2 = " ".join(item[settings.line2_format] for item in kksresult) if settings.line2_format != "none" else ""
                 
                 if not prevline == kksresult:
-                    display.printText(0, 0, line1, gs=15)
-                    display.printText(0, 0, line2, gs=15) if lyrics_lang == "ja" else ""
+                    display.printText(0, 0, f"{line1}", gs=15)
+                    if lyrics_lang == "ja":
+                        display.printText(0, 0, line2, gs=15) 
 
                 # Check if the song was skipped, changed, or stopped mid-playback
                 poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
                 active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
-                
-                # Break out to the outer loop if playback stopped OR the track ID changed
-                if not active_entries or active_entries[0].get("id") != current_track_id:
+                isListening = track.get("state", []) # get the user's listening state (playing, paused, stopped, etc.)
+
+                # based on the user's listening state (if playback stopped OR the track ID changed), break out to the outer loop
+                if not active_entries or active_entries[0].get("id") != current_track_id or isListening != "playing":
+                    if current_track_id is not None: # if the user WAS listening but has now stopped,
+                        display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
+                        current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
                     break
 
             else:
@@ -155,9 +149,13 @@ def main():
                     time.sleep(1)
                     poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
                     active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
-                    
-                    # Finally break out to the main outer loop when the track changes or stops
-                    if not active_entries or active_entries[0].get("id") != current_track_id:
+                    isListening = track.get("state", []) # get the user's listening state (playing, paused, stopped, etc.)
+
+                    # based on the user's listening state (if playback stopped OR the track ID changed), break out to the outer loop
+                    if not active_entries or active_entries[0].get("id") != current_track_id or isListening != "playing":
+                        if current_track_id is not None: # if the user WAS listening but has now stopped,
+                            display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
+                            current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
                         break
 
             # Brief pause at the end of a song before polling for the next track
@@ -171,4 +169,7 @@ def main():
 
 # actually run the code lol
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nExiting lyric-hud...")
