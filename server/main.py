@@ -1,5 +1,4 @@
 ## default libraries?
-import sys # used to check if we're running on a MicroPython device or not, and to import the machine module if we are
 import time # used to sleep between polling the navidrome api for the current track and lyrics
 import requests # used to make HTTP requests to the navidrome api to get the current track and lyrics
 import yaml # to read yaml config files
@@ -12,9 +11,8 @@ from lib.lyriq import get_lyrics, Lyrics # used to fetch lyrics from the lrclib 
 from langdetect import detect # used to detect the language of the lyrics
 
 ## my modules
-from displays import OLEDDisplay, TerminalDisplay # used to create the display object, either for the terminal or for the hardware
 from credentials import params, url # used to store the navidrome api credentials and url
-from functions import nav2lrc # uhhh ya
+from functions import nav2lrc, TerminalDisplay # misc functions and classes
 
 # import settings from settings.yaml
 with open("settings.yaml", "r", encoding="utf-8") as f:
@@ -23,19 +21,8 @@ with open("settings.yaml", "r", encoding="utf-8") as f:
 # o kaaaayyyyy imports done lets actually Do the Thing
 
 def main():
-    ### TEST MODE SETUP ###
-    # check if we're in test mode
-    test_mode = "--test" in sys.argv
-
-    # if we're not in test mode, try to import the machine module to see if we're running on a MicroPython device
-    if not test_mode:
-        try:
-            from machine import Pin, SPI  # type: ignore  # noqa: F401
-        except ImportError:
-            test_mode = True # if it gives an error, we're not on a MicroPython device, so we should switch to test mode
-
-    # create the display object, either for the terminal or for the hardware
-    display = TerminalDisplay() if test_mode else OLEDDisplay()
+    # create the display object
+    display = TerminalDisplay()
 
     # initialize the current track ID to None so we can detect when a new song starts
     current_track_id = None
@@ -50,17 +37,26 @@ def main():
             getNowPlaying = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json() 
             nowPlaying = getNowPlaying.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
 
+            # if navidrome didn't return anything, user was not listening to anything yet.
+            if not nowPlaying:
+                if current_track_id is not None:
+                    display.printText(0, 0, "-- nothing is playing --", gs=15)
+                    current_track_id = None
+                time.sleep(1)
+                continue
+
             # assign track info to variables for easier access
             track = nowPlaying[0] # set the API response to the track variable
             track_id = track.get("id") # get the track's ID
             position_ms = track.get("positionMs", 0) # get the user's position in the song in milliseconds
-            isListening = track.get("state", []) # get the user's listening state (starting, playing, paused, or stopped)
+            listenState = track.get("state", []) # get the user's listening state (starting, playing, paused, or stopped)
 
-            # based on the user's listening state, decide what to do next.
-            if isListening == "paused" or isListening == "stopped": # if the user is not currently listening,
+            # navidrome holds the last track in the API response even if the user is no longer listening, so we need to check for that.
+            if listenState == "paused" or listenState == "stopped": # if the user is not currently listening,
                 if current_track_id is not None: # if the user WAS listening but has now stopped,
                     display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
                     current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
+                time.sleep(1)
                 continue
 
             # using monotonic time allows us to get the current playback position without worrying about API latency or delay
@@ -130,14 +126,15 @@ def main():
                     display.printText(0, 0, f"{line1}", gs=15)
                     if lyrics_lang == "ja":
                         display.printText(0, 0, line2, gs=15) 
+                    prevline = kksresult
 
                 # Check if the song was skipped, changed, or stopped mid-playback
                 poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
                 active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
-                isListening = track.get("state", []) # get the user's listening state (playing, paused, stopped, etc.)
+                listenState = active_entries[0].get("state") if active_entries else "stopped" # get the user's listening state (playing, paused, stopped, etc.)
 
                 # based on the user's listening state (if playback stopped OR the track ID changed), break out to the outer loop
-                if not active_entries or active_entries[0].get("id") != current_track_id or isListening != "playing":
+                if not active_entries or active_entries[0].get("id") != current_track_id or listenState != "playing":
                     if current_track_id is not None: # if the user WAS listening but has now stopped,
                         display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
                         current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
@@ -149,10 +146,10 @@ def main():
                     time.sleep(1)
                     poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
                     active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
-                    isListening = track.get("state", []) # get the user's listening state (playing, paused, stopped, etc.)
+                    listenState = active_entries[0].get("state") if active_entries else "stopped" # get the user's listening state (playing, paused, stopped, etc.)
 
                     # based on the user's listening state (if playback stopped OR the track ID changed), break out to the outer loop
-                    if not active_entries or active_entries[0].get("id") != current_track_id or isListening != "playing":
+                    if not active_entries or active_entries[0].get("id") != current_track_id or listenState != "playing":
                         if current_track_id is not None: # if the user WAS listening but has now stopped,
                             display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
                             current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
@@ -160,12 +157,11 @@ def main():
 
             # Brief pause at the end of a song before polling for the next track
             time.sleep(1)
-            prevline = kksresult
+            
 
         except Exception as e: # catch any errors that occur during the main loop and print them to the console
             print(f"Polling error: {e}")
             time.sleep(3)
-        
 
 # actually run the code lol
 if __name__ == "__main__":
