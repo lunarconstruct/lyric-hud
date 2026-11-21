@@ -5,20 +5,22 @@ import yaml # to read yaml config files
 from types import SimpleNamespace
 
 ## third-party libraries
-import pykakasi # used to convert Japanese lyrics into romaji/kana/hiragana
 from bisect import bisect_right # used to find the index of the current lyric line based on the current playback time
 from lib.lyriq import get_lyrics, Lyrics # used to fetch lyrics from the lrclib and parse them into a Lyrics object
 from langdetect import detect # used to detect the language of the lyrics
+import pykakasi # used to convert Japanese lyrics into romaji/kana/hiragana
+kks = pykakasi.kakasi()
 
 ## my modules
 from credentials import params, url # used to store the navidrome api credentials and url
-from functions import nav2lrc, TerminalDisplay # misc functions and classes
+from functions import nav2lrc, introduceSong, setSongInfo # misc functions and classes
+from display import TerminalDisplay
 
 # import settings from settings.yaml
 with open("settings.yaml", "r", encoding="utf-8") as f:
     settings = SimpleNamespace(**yaml.safe_load(f))
 
-# o kaaaayyyyy imports done lets actually Do the Thing
+####### o kaaaayyyyy imports done lets actually Do the Thing
 
 def main():
     # create the display object
@@ -37,73 +39,35 @@ def main():
             getNowPlaying = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json() 
             nowPlaying = getNowPlaying.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
 
-            # if navidrome didn't return anything, user was not listening to anything yet.
-            if not nowPlaying:
-                if current_track_id is not None:
-                    display.printText(0, 0, "-- nothing is playing --", gs=15)
-                    current_track_id = None
-                time.sleep(1)
-                continue
-
             # assign track info to variables for easier access
-            track = nowPlaying[0] # set the API response to the track variable
-            track_id = track.get("id") # get the track's ID
-            position_ms = track.get("positionMs", 0) # get the user's position in the song in milliseconds
-            listenState = track.get("state", []) # get the user's listening state (starting, playing, paused, or stopped)
+            track, track_id, position_ms, listenState = setSongInfo(nowPlaying)
 
-            # navidrome holds the last track in the API response even if the user is no longer listening, so we need to check for that.
-            if listenState == "paused" or listenState == "stopped": # if the user is not currently listening,
-                if current_track_id is not None: # if the user WAS listening but has now stopped,
-                    display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
-                    current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
-                time.sleep(1)
+            # stop/pause/empty check
+            if listenState != "playing":
+                if current_track_id is not None:
+                    msg = "-- nothing is playing --" if listenState == "empty" else "-- music stopped --"
+                    display.printText(0, 0, msg, gs=15)
+                    current_track_id = None
+                time.sleep(.25)
                 continue
-
-            # using monotonic time allows us to get the current playback position without worrying about API latency or delay
-            song_start_time = time.monotonic() - (position_ms / 1000.0)
 
             # if the track ID that gets pulled from the API is different from the current track ID,
             if track_id != current_track_id:
-                current_track_id = track_id # update the current track ID to the new track ID
-                display.printText(0, 0, "-- loading next... --", gs=15)
-                song_name = track.get("title", "Unknown") # get the song name from the API response, "unknown" by default
-                artist_name = track.get("artist", "Unknown") # get the artist name from the API response, "unknown" by default
-                                
-                # ask navidrome for the lyrics of the current track using the track ID
-                getSubsonicLyrics = requests.get(f"{url}getLyricsBySongId?id={track_id}", params=params, timeout=5).json()
-                subsonicLyrics = (getSubsonicLyrics.get("subsonic-response", {}).get("lyricsList", {}).get("structuredLyrics", []))
-
-                # display the song name and artist name on the screen
-                display.printText(0, 0, "------------------------", gs=15)
-                display.printText(0, 0, f"{song_name} - {artist_name}", gs=15)
-
-                # if navidrome provided lyrics, use them.
-                if subsonicLyrics:
-                    # get lyric data from the API response and detect the language of the lyrics
-                    lyric_track = subsonicLyrics[0]
-                    lines = lyric_track.get("line", [])
-                    lyrics_text = "\n".join(item.get("value", "") for item in lines)
-                    lyrics_lang = detect(lyrics_text)
-
-                    # display the source of the lyrics and the detected language
-                    display.printText(0, 0, f"lyrics provided by navidrome | language: {lyrics_lang}", gs=15)
-                    display.printText(0, 0, "------------------------", gs=15)
-
-                    # if there are synced lyrics
-                    if lyric_track.get("synced"):
-                        timed_lyrics, lyrics_text = nav2lrc(lines)
-                        nav2lrc(lines) # convert navidrome's lyric timestamps into .lrc format for the parser
-
-                    else: # if there are no synced lyrics, just display the plain text lyrics
-                        lyrics = None # set no synced lyrics
-                        lyrics_text = "\n".join(line.get("value", "") for line in lines) # set plain text lyrics
-                        display.printText(0, 0, "no time-synced lyrics available. displaying all lyrics.", gs=15)
-                        display.printText(0, 0, lyrics_text, gs=15)
+                poll_time = time.monotonic()
+                current_track_id, timed_lyrics, lyrics_text, lyrics_lang = introduceSong(track, track_id, display, url, params)
                 
-                else: # if navidrome did not provide lyrics, pull from lrclib
-                    display.printText(0, 0, "lyrics provided by lrclib", gs=15)
-                    lyrics = get_lyrics(song_name, artist_name)
-                    lyrics_text = lyrics.plain_lyrics if lyrics else "lyrics not found :("
+                # Re-check position right after fetching lyrics in case the client updated it
+                post_fetch = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
+                post_entry = post_fetch.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
+                fresh_pos_ms = post_entry[0].get("positionMs", 0) if post_entry else 0
+
+                if fresh_pos_ms > position_ms:
+                    song_start_time = time.monotonic() - (fresh_pos_ms / 1000.0)
+                else:
+                    # Client (like Feishin) isn't updating positionMs live, so anchor to when we first saw the track start
+                    # Add a ~0.5s - 1.0s offset to account for polling interval + Feishin's initial scrobble delay
+                    CLIENT_OFFSET_SEC = 1.5
+                    song_start_time = poll_time - (position_ms / 1000.0) - CLIENT_OFFSET_SEC
 
             # 4. Play through the lyrics for the current song
             current_pos_sec = time.monotonic() - song_start_time
@@ -117,7 +81,6 @@ def main():
                     time.sleep(wait_time)
 
                 # convert lyrics writing system (kana, hiragana, etc) if the settings call for it
-                kks = pykakasi.kakasi()
                 kksresult = kks.convert(line)
                 line1 = " ".join(item[settings.line1_format] for item in kksresult) if settings.line1_format != "none" else ""
                 line2 = " ".join(item[settings.line2_format] for item in kksresult) if settings.line2_format != "none" else ""
@@ -156,12 +119,13 @@ def main():
                         break
 
             # Brief pause at the end of a song before polling for the next track
-            time.sleep(1)
+            time.sleep(.25)
             
 
         except Exception as e: # catch any errors that occur during the main loop and print them to the console
             print(f"Polling error: {e}")
             time.sleep(3)
+
 
 # actually run the code lol
 if __name__ == "__main__":
