@@ -1,30 +1,37 @@
 ## default libraries?
+import json
+import os
 import time # used to sleep between polling the navidrome api for the current track and lyrics
 import requests # used to make HTTP requests to the navidrome api to get the current track and lyrics
-import yaml # to read yaml config files
-from types import SimpleNamespace
 
 ## third-party libraries
 from bisect import bisect_right # used to find the index of the current lyric line based on the current playback time
-from lib.lyriq import get_lyrics, Lyrics # used to fetch lyrics from the lrclib and parse them into a Lyrics object
-from langdetect import detect # used to detect the language of the lyrics
-import pykakasi # used to convert Japanese lyrics into romaji/kana/hiragana
-kks = pykakasi.kakasi()
 
 ## my modules
-from credentials import params, url # used to store the navidrome api credentials and url
-from functions import nav2lrc, introduceSong, setSongInfo # misc functions and classes
+from functions import (
+    convert_lyric_line,
+    detect_lyric_language,
+    introduceSong,
+    publish_web_state,
+    refresh_web_settings,
+    setSongInfo,
+    settings,
+)
 from display import TerminalDisplay
 
-# import settings from settings.yaml
-with open("settings.yaml", "r", encoding="utf-8") as f:
-    settings = SimpleNamespace(**yaml.safe_load(f))
+with open(os.path.join(os.path.dirname(__file__), "credentials.json"), "r", encoding="utf-8") as credentials_file:
+    credentials = json.load(credentials_file)
+
+url = credentials["url"]
+params = credentials["params"]
 
 ####### o kaaaayyyyy imports done lets actually Do the Thing
 
 def main():
     # create the display object
     display = TerminalDisplay()
+    # initialize the web ui state
+    publish_web_state(status="waiting", title="", artist="", current_line="", lyrics="")
 
     # initialize the current track ID to None so we can detect when a new song starts
     current_track_id = None
@@ -41,6 +48,7 @@ def main():
 
             # assign track info to variables for easier access
             track, track_id, position_ms, listenState = setSongInfo(nowPlaying)
+            publish_web_state(status=listenState)
 
             # stop/pause/empty check
             if listenState != "playing":
@@ -48,13 +56,23 @@ def main():
                     msg = "-- nothing is playing --" if listenState == "empty" else "-- music stopped --"
                     display.printText(0, 0, msg, gs=15)
                     current_track_id = None
+                    publish_web_state(title="", artist="", current_line="", lyrics="")
                 time.sleep(.25)
                 continue
 
             # if the track ID that gets pulled from the API is different from the current track ID,
             if track_id != current_track_id:
-                poll_time = time.monotonic()
+                poll_time = time.monotonic() # note what time we polled the API
+                # fetch the info for the new track and update the current track ID
                 current_track_id, timed_lyrics, lyrics_text, lyrics_lang = introduceSong(track, track_id, display, url, params)
+                # also push the track info to the web ui
+                publish_web_state(
+                    status="playing",
+                    title=track.get("title", "Unknown"),
+                    artist=track.get("artist", "Unknown"),
+                    current_line="" if timed_lyrics else "no synced lyrics",
+                    lyrics=lyrics_text or "",
+                )
                 
                 # Re-check position right after fetching lyrics in case the client updated it
                 post_fetch = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
@@ -81,15 +99,26 @@ def main():
                     time.sleep(wait_time)
 
                 # convert lyrics writing system (kana, hiragana, etc) if the settings call for it
-                kksresult = kks.convert(line)
-                line1 = " ".join(item[settings.line1_format] for item in kksresult) if settings.line1_format != "none" else ""
-                line2 = " ".join(item[settings.line2_format] for item in kksresult) if settings.line2_format != "none" else ""
+                refresh_web_settings() # check if web settings have changed and update the settings object if they have
+                line_language = detect_lyric_language(line, lyrics_lang)
+                line_formats = convert_lyric_line(line, line_language)
+                if line_language is None:
+                    line1 = line_formats["orig"]
+                    line2 = ""
+                else:
+                    line1 = line_formats[getattr(settings, f"{line_language}_line1_format")]
+                    line2 = line_formats[getattr(settings, f"{line_language}_line2_format")]
+                rendered_line = (line1, line2)
                 
-                if not prevline == kksresult:
+                if prevline != rendered_line:
                     display.printText(0, 0, f"{line1}", gs=15)
-                    if lyrics_lang == "ja":
+                    show_second_line = bool(line2)
+                    if show_second_line:
                         display.printText(0, 0, line2, gs=15) 
-                    prevline = kksresult
+                    prevline = rendered_line
+                    publish_web_state(
+                        current_line=f"{line1}\n{line2}" if show_second_line else line1
+                    )
 
                 # Check if the song was skipped, changed, or stopped mid-playback
                 poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()

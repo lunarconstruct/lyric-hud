@@ -7,6 +7,25 @@ python is new to me and so is working with most physical hardware like microcont
 
 ---
 
+## server configuration
+
+Create `server/credentials.json` with your Navidrome server URL and Subsonic API parameters:
+
+```json
+{
+  "url": "https://your-navidrome-server/rest/",
+  "params": {
+    "u": "your-username",
+    "p": "your-password-or-token",
+    "v": "your-subsonic-api-version",
+    "c": "lyric-hud",
+    "f": "json"
+  }
+}
+```
+
+This file is gitignored because it contains credentials.
+
 ## hardware
 plans are for this to be built with:
 - ESP32 microcontroller

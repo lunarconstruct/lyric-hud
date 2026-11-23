@@ -1,5 +1,6 @@
 requests
 PyYAML
 pykakasi
+korean-romanizer
 langdetect
 flask

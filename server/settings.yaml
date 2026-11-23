@@ -1,4 +1,9 @@
-### LYRICS
-# set desired lyrics format (‘orig’, ‘kana’, ‘hira’, ‘hepburn’, ‘kunrei’, ‘passport’, 'none')
-line1_format: 'orig'
-line2_format: 'hepburn'
+### JAPANESE LYRICS
+# formats: 'orig', 'kana', 'hira', 'hepburn', 'kunrei', 'passport', 'none'
+ja_line1_format: 'orig'
+ja_line2_format: 'hepburn'
+
+### KOREAN LYRICS
+# formats: 'orig', 'romanized', 'none'
+ko_line1_format: 'orig'
+ko_line2_format: 'romanized'
