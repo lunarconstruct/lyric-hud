@@ -108,7 +108,7 @@
         }
     }
 
-    function get_title($url){
+    function get_title(string $url){
         $str = file_get_contents($url);
         if(strlen($str)>0){
             $str = trim(preg_replace('/\s+/', ' ', $str)); // supports line breaks inside <title>
@@ -122,7 +122,7 @@
     $connectionUser = $connection['params']['u'] ?? '';
 
     // function to escape HTML special characters
-    function escapeHtml($value) {
+    function escapeHtml(string $value) {
         return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 ?>
@@ -141,9 +141,21 @@
         <p id="playback-status">Status: <?= escapeHtml($state['status']) ?></p>
 
         <div id="lyrics">
-            <p id="previous-line" style="white-space: pre-line"><?= escapeHtml($state['previous_line']) ?></p>
-            <p id="current-line" style="white-space: pre-line"><?= escapeHtml($state['current_line']) ?></p>
-            <p id="next-line" style="white-space: pre-line"><?= escapeHtml($state['next_line']) ?></p>
+            <p id="previous-line">
+                <span class="line-1"><?= escapeHtml($state['previous_line1']) ?></span>
+                <span class="line-2"><?= escapeHtml($state['previous_line2'] ?: '') ?></span>
+            </p>
+
+            <p id="current-line">
+                <span class="line-1"><?= escapeHtml($state['current_line1']) ?></span>
+                <span class="line-2"><?= escapeHtml($state['current_line2'] ?: '') ?></span>
+            </p>
+
+            <p id="next-line">
+                <span class="line-1"><?= escapeHtml($state['next_line1']) ?></span>
+                <span class="line-2"><?= escapeHtml($state['next_line2'] ?: '') ?></span>
+            </p>
+
         </div>
 
         <h2>settings</h2>
@@ -192,6 +204,23 @@
             <p>Settings saved. They will apply from the next lyric line.</p>
         <?php endif; ?>
         <script>
+            function updateLyricBlock(elementId, line1, line2) {
+                const container = document.getElementById(elementId);
+                if (!container) return;
+
+                let span1 = container.querySelector('.line-1');
+                let span2 = container.querySelector('.line-2');
+
+                if (!span1 || !span2) {
+                    container.innerHTML = '<span class="line-1"></span><span class="line-2"></span>';
+                    span1 = container.querySelector('.line-1');
+                    span2 = container.querySelector('.line-2');
+                }
+
+                span1.textContent = line1 || '';
+                span2.textContent = line2 || '';
+            }
+
             async function updateNowPlaying() {
                 try {
                     const response = await fetch('state.php', { cache: 'no-store' });
@@ -204,9 +233,10 @@
                         `${state.title || 'Nothing playing'} - ${state.artist || ''}`;
                     document.getElementById('playback-status').textContent =
                         `Status: ${state.status || 'waiting'}`;
-                    document.getElementById('previous-line').textContent = state.previous_line || '';
-                    document.getElementById('current-line').textContent = state.current_line || '';
-                    document.getElementById('next-line').textContent = state.next_line || '';
+
+                    updateLyricBlock('previous-line', state.previous_line1, state.previous_line2);
+                    updateLyricBlock('current-line', state.current_line1, state.current_line2);
+                    updateLyricBlock('next-line', state.next_line1, state.next_line2);
                 } catch (error) {
                     console.error('Could not update now-playing info:', error);
                 }

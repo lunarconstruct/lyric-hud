@@ -1,21 +1,17 @@
 import json # used for reading/writing json files
 import os
-from types import SimpleNamespace
 
-import yaml # used for file path manipulation and checking if files exist
+from langdetect import detect
+from lang_func import settings, LYRIC_LANGUAGE_FORMATS
+
 from lib.lyriq import get_lyrics, Lyrics # used to fetch lyrics from the lrclib and parse them into a Lyrics object
 import requests # used to make HTTP requests to the navidrome api to get the current track and lyrics
-from langdetect import detect
-from korean_romanizer import Romanizer
-import pykakasi # used to convert Japanese lyrics into romaji/kana/hiragana
-kks = pykakasi.kakasi()
+
 
 
 ## global variables
 WEB_STATE_PATH = os.path.join(os.path.dirname(__file__), "web_state.json") # stores the current state for the web ui
 WEB_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "web_settings.json") # stores the current settings from the web ui
-VALID_LYRIC_FORMATS = {"orig", "kana", "hira", "hepburn", "kunrei", "passport", "none"}
-KOREAN_LYRIC_FORMATS = {"orig", "romanized", "none"}
 # default web state, will be updated by the publish_web_state function
 web_state = {
     "status": "waiting",
@@ -24,23 +20,6 @@ web_state = {
     "current_line": "",
     "lyrics": "",
 }
-
-# Load per-language settings.
-with open("settings.yaml", "r", encoding="utf-8") as f:
-    yaml_settings = yaml.safe_load(f)
-
-LYRIC_LANGUAGE_FORMATS = {
-    "ja": VALID_LYRIC_FORMATS,
-    "ko": KOREAN_LYRIC_FORMATS,
-}
-
-LYRIC_CONVERTERS = {}
-
-settings = SimpleNamespace(**{
-    f"{language}_{line_number}_format": yaml_settings[f"{language}_{line_number}_format"]
-    for language in LYRIC_LANGUAGE_FORMATS
-    for line_number in ("line1", "line2")
-})
 
 def publish_web_state(**updates):
     if not any(web_state.get(key) != value for key, value in updates.items()):
@@ -72,52 +51,6 @@ def refresh_web_settings():
         if not isinstance(value, str) or value not in valid_formats:
             raise ValueError(f"Invalid {key} in web settings")
         setattr(settings, key, value)
-
-
-def contains_hangul(text):
-    return any(
-        "\uac00" <= char <= "\ud7a3"
-        or "\u1100" <= char <= "\u11ff"
-        or "\u3130" <= char <= "\u318f"
-        for char in text
-    )
-
-
-def convert_japanese_line(line):
-    converted = kks.convert(line)
-    return {
-        format_name: (
-            "" if format_name == "none"
-            else " ".join(item[format_name] for item in converted)
-        )
-        for format_name in VALID_LYRIC_FORMATS
-    }
-
-
-def convert_korean_line(line):
-    romanized = Romanizer(line).romanize()
-    return {"orig": line, "romanized": romanized, "none": ""}
-
-
-LYRIC_CONVERTERS.update({
-    "ja": convert_japanese_line,
-    "ko": convert_korean_line,
-})
-
-
-def detect_lyric_language(line, track_language):
-    if contains_hangul(line):
-        return "ko"
-    if track_language in LYRIC_CONVERTERS:
-        return track_language
-    return None
-
-
-def convert_lyric_line(line, language):
-    converter = LYRIC_CONVERTERS.get(language)
-    if converter is None:
-        return {"orig": line, "none": ""}
-    return converter(line)
 
 def setSongInfo(nowPlaying):
     if not nowPlaying:
@@ -202,21 +135,6 @@ def parse_lyriq_obj(lyrics_obj):
 
     # If the Lyrics object had no synced timestamps, return None for timed_lyrics
     return (timed_lyrics if timed_lyrics else None), lyrics_obj.plain_lyrics
-
-def get_formatted_lines(raw_line, lyrics_lang, settings):
-    """Converts a raw lyric string into a (line1, line2) tuple based on settings."""
-    if not raw_line:
-        return ("", "")
-        
-    lang = detect_lyric_language(raw_line, lyrics_lang)
-    formats = convert_lyric_line(raw_line, lang)
-    
-    if lang is None:
-        return (formats["orig"], "")
-        
-    line1 = formats[getattr(settings, f"{lang}_line1_format")]
-    line2 = formats[getattr(settings, f"{lang}_line2_format")]
-    return (line1, line2)
 
 def nav2lrc(lines):
     lrc_lines = []

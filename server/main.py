@@ -9,13 +9,15 @@ from bisect import bisect_right # used to find the index of the current lyric li
 
 ## my modules
 from functions import (
-    convert_lyric_line,
-    detect_lyric_language,
     introduceSong,
     publish_web_state,
     refresh_web_settings,
     setSongInfo,
     settings,
+)
+from lang_func import (
+    convert_lyric_line,
+    detect_lyric_language,
     get_formatted_lines,
 )
 from display import TerminalDisplay
@@ -32,7 +34,7 @@ def main():
     # create the display object
     display = TerminalDisplay()
     # initialize the web ui state
-    publish_web_state(status="waiting", title="", artist="", current_line="", lyrics="")
+    publish_web_state(status="waiting", title="", artist="", current_line1="", current_line2="", next_line1="", next_line2="", lyrics="")
 
     # initialize the current track ID to None so we can detect when a new song starts
     current_track_id = None
@@ -57,7 +59,7 @@ def main():
                     msg = "-- nothing is playing --" if listenState == "empty" else "-- music stopped --"
                     display.printText(0, 0, msg, gs=15)
                     current_track_id = None
-                    publish_web_state(title="", artist="", current_line="", lyrics="")
+                    publish_web_state(title="", artist="", current_line1="", current_line2="", next_line1="", next_line2="", lyrics="")
                 time.sleep(.25)
                 continue
 
@@ -71,7 +73,12 @@ def main():
                     status="playing",
                     title=track.get("title", "Unknown"),
                     artist=track.get("artist", "Unknown"),
-                    current_line="" if timed_lyrics else "no synced lyrics",
+                    previous_line1="",
+                    previous_line2="",
+                    current_line1=f"{track.get("title", "Unknown")} - {track.get("artist", "Unknown")}",
+                    current_line2="" if timed_lyrics else "no synced lyrics",
+                    next_line1="",
+                    next_line2="",
                     lyrics=lyrics_text or "",
                 )
                 
@@ -94,7 +101,6 @@ def main():
             if timed_lyrics:
                 current_pos_sec = time.monotonic() - song_start_time
                 start_index = max(0, bisect_right(timed_lyrics, current_pos_sec, key=lambda x: x[0]) - 1)
-                next_index = start_index + 1
                 
                 prev_rendered = ("", "")
 
@@ -132,12 +138,15 @@ def main():
                     
                     # post the lines for the web ui to pull
                     publish_web_state(
-                        previous_line=f"{prev1}\n{prev2}" if prev2 else prev1,
-                        current_line=f"{line1}\n{line2}" if line2 else line1,
-                        next_line=f"{next1}\n{next2}" if next2 else next1
+                        previous_line1=prev1 if prev1 else "",
+                        previous_line2=prev2 if prev2 else "",
+                        current_line1=line1 if line1 else "",
+                        current_line2=line2 if line2 else "",
+                        next_line1=next1 if next1 else "",
+                        next_line2=next2 if next2 else "",
                     )
                     
-                    # when finished rendering this line, set it to the prevline variable
+                     # when finished rendering this line, set it to the prevline variable
                     prev_rendered = rendered_line 
 
                     # Check if the song was skipped, changed, or stopped mid-playback
