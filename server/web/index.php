@@ -129,6 +129,7 @@
 
 <html>
     <head>
+        <link rel="stylesheet" href="style.css">
     </head>
     <body>
         <h1>lyric-hud web ui</h1>
@@ -136,11 +137,14 @@
         <p id="server-info">connected to <b><a href="<?= escapeHtml($connectionServer) ?>" target="_blank"><?= escapeHtml($connectionServerTitle) ?></a></b> as <b><?= escapeHtml($connectionUser) ?></b></p>
 
         <h2>playing now...</h2>
-        <p id="now-playing"><?= escapeHtml($state['title'] ?: 'Nothing playing') ?> - <?= escapeHtml($state['artist']) ?></p>
+        <h4 id="now-playing"><?= escapeHtml($state['title'] ?: 'Nothing playing') ?> - <?= escapeHtml($state['artist']) ?></h4>
         <p id="playback-status">Status: <?= escapeHtml($state['status']) ?></p>
 
-        <h2>current lyric</h2>
-        <p id="current-line" style="white-space: pre-line"><?= escapeHtml($state['current_line']) ?></p>
+        <div id="lyrics">
+            <p id="previous-line" style="white-space: pre-line"><?= escapeHtml($state['previous_line']) ?></p>
+            <p id="current-line" style="white-space: pre-line"><?= escapeHtml($state['current_line']) ?></p>
+            <p id="next-line" style="white-space: pre-line"><?= escapeHtml($state['next_line']) ?></p>
+        </div>
 
         <h2>settings</h2>
         <h3>Japanese lyric formatting</h3>
@@ -200,8 +204,9 @@
                         `${state.title || 'Nothing playing'} - ${state.artist || ''}`;
                     document.getElementById('playback-status').textContent =
                         `Status: ${state.status || 'waiting'}`;
+                    document.getElementById('previous-line').textContent = state.previous_line || '';
                     document.getElementById('current-line').textContent = state.current_line || '';
-                    document.getElementById('lyrics').textContent = state.lyrics || '';
+                    document.getElementById('next-line').textContent = state.next_line || '';
                 } catch (error) {
                     console.error('Could not update now-playing info:', error);
                 }

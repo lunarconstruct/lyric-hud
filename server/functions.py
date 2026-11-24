@@ -203,6 +203,20 @@ def parse_lyriq_obj(lyrics_obj):
     # If the Lyrics object had no synced timestamps, return None for timed_lyrics
     return (timed_lyrics if timed_lyrics else None), lyrics_obj.plain_lyrics
 
+def get_formatted_lines(raw_line, lyrics_lang, settings):
+    """Converts a raw lyric string into a (line1, line2) tuple based on settings."""
+    if not raw_line:
+        return ("", "")
+        
+    lang = detect_lyric_language(raw_line, lyrics_lang)
+    formats = convert_lyric_line(raw_line, lang)
+    
+    if lang is None:
+        return (formats["orig"], "")
+        
+    line1 = formats[getattr(settings, f"{lang}_line1_format")]
+    line2 = formats[getattr(settings, f"{lang}_line2_format")]
+    return (line1, line2)
 
 def nav2lrc(lines):
     lrc_lines = []

@@ -16,6 +16,7 @@ from functions import (
     refresh_web_settings,
     setSongInfo,
     settings,
+    get_formatted_lines,
 )
 from display import TerminalDisplay
 
@@ -87,50 +88,69 @@ def main():
                     CLIENT_OFFSET_SEC = 1.5
                     song_start_time = poll_time - (position_ms / 1000.0) - CLIENT_OFFSET_SEC
 
-            # 4. Play through the lyrics for the current song
-            current_pos_sec = time.monotonic() - song_start_time
-            start_index = max(0, bisect_right(timed_lyrics, current_pos_sec, key=lambda x: x[0]) - 1)
-            
-            prevline = None
+            ### LYRIC LOOP ###
+            timed_lyrics = [item for item in timed_lyrics if len(item) == 2]
 
-            for time_sec, line in timed_lyrics[start_index:]:
-                wait_time = time_sec - (time.monotonic() - song_start_time)
-                if wait_time > 0:
-                    time.sleep(wait_time)
-
-                # convert lyrics writing system (kana, hiragana, etc) if the settings call for it
-                refresh_web_settings() # check if web settings have changed and update the settings object if they have
-                line_language = detect_lyric_language(line, lyrics_lang)
-                line_formats = convert_lyric_line(line, line_language)
-                if line_language is None:
-                    line1 = line_formats["orig"]
-                    line2 = ""
-                else:
-                    line1 = line_formats[getattr(settings, f"{line_language}_line1_format")]
-                    line2 = line_formats[getattr(settings, f"{line_language}_line2_format")]
-                rendered_line = (line1, line2)
+            if timed_lyrics:
+                current_pos_sec = time.monotonic() - song_start_time
+                start_index = max(0, bisect_right(timed_lyrics, current_pos_sec, key=lambda x: x[0]) - 1)
+                next_index = start_index + 1
                 
-                if prevline != rendered_line:
-                    display.printText(0, 0, f"{line1}", gs=15)
-                    show_second_line = bool(line2)
-                    if show_second_line:
-                        display.printText(0, 0, line2, gs=15) 
-                    prevline = rendered_line
-                    publish_web_state(
-                        current_line=f"{line1}\n{line2}" if show_second_line else line1
+                prev_rendered = ("", "")
+
+                for i in range(start_index, len(timed_lyrics)):
+                    time_sec, line = timed_lyrics[i]
+                    
+                    wait_time = time_sec - (time.monotonic() - song_start_time)
+                    if wait_time > 0:
+                        time.sleep(wait_time)
+
+                    # Check for updated settings once per lyric line
+                    refresh_web_settings()
+
+                    # get and format current line
+                    rendered_line = get_formatted_lines(line, lyrics_lang, settings)
+
+                    # get and format next line
+                    if i + 1 < len(timed_lyrics):
+                        _, raw_next_line = timed_lyrics[i + 1]
+                        next_rendered = get_formatted_lines(raw_next_line, lyrics_lang, settings)
+                    else:
+                        next_rendered = ("", "")  # Default to blank on the final line of the song
+                    
+                    # set variables for each line
+                    line1, line2 = rendered_line
+                    prev1, prev2 = prev_rendered
+                    next1, next2 = next_rendered
+
+                    # print the lines on the terminal or OLED
+                    display.printText(
+                        0, 0,
+                        f"{line1}\n{line2}" if line2 else line1,
+                        gs=15
                     )
+                    
+                    # post the lines for the web ui to pull
+                    publish_web_state(
+                        previous_line=f"{prev1}\n{prev2}" if prev2 else prev1,
+                        current_line=f"{line1}\n{line2}" if line2 else line1,
+                        next_line=f"{next1}\n{next2}" if next2 else next1
+                    )
+                    
+                    # when finished rendering this line, set it to the prevline variable
+                    prev_rendered = rendered_line 
 
-                # Check if the song was skipped, changed, or stopped mid-playback
-                poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
-                active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
-                listenState = active_entries[0].get("state") if active_entries else "stopped" # get the user's listening state (playing, paused, stopped, etc.)
+                    # Check if the song was skipped, changed, or stopped mid-playback
+                    poll = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
+                    active_entries = poll.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
+                    listenState = active_entries[0].get("state") if active_entries else "stopped" # get the user's listening state (playing, paused, stopped, etc.)
 
-                # based on the user's listening state (if playback stopped OR the track ID changed), break out to the outer loop
-                if not active_entries or active_entries[0].get("id") != current_track_id or listenState != "playing":
-                    if current_track_id is not None: # if the user WAS listening but has now stopped,
-                        display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
-                        current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
-                    break
+                    # based on the user's listening state (if playback stopped OR the track ID changed), break out to the outer loop
+                    if not active_entries or active_entries[0].get("id") != current_track_id or listenState != "playing":
+                        if current_track_id is not None: # if the user WAS listening but has now stopped,
+                            display.printText(0, 0, "-- music stopped --", gs=15) # display "music stopped" message
+                            current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
+                        break
 
             else:
                 # Using `for ... else` ensures this ONLY runs if the song wasn't skipped early
