@@ -1,6 +1,7 @@
 requests
 PyYAML
-pykakasi
+cutlet
+jaconv
+unidic-lite
 korean-romanizer
 langdetect
-flask

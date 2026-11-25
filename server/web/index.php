@@ -72,14 +72,14 @@
         $settingsSaved = true;
     }
 
-    // default state of web ui
-    $state = [
-        'status' => 'waiting',
-        'title' => '',
-        'artist' => '',
-        'current_line' => '',
-        'lyrics' => '',
-    ];
+    $defaultsContents = file_get_contents(__DIR__ . '/default_state.json');
+    if ($defaultsContents === false) {
+        throw new RuntimeException('Could not read default web state.');
+    }
+    $state = json_decode($defaultsContents, true, 512, JSON_THROW_ON_ERROR);
+    if (!is_array($state)) {
+        throw new RuntimeException('Default web state must be a JSON object.');
+    }
     // path to the state file
     $statePath = __DIR__ . '/web_state.json';
 
@@ -142,6 +142,8 @@
         <h2>connection info</h2>
 
         <p id="server-info">connected to <b><a href="<?= escapeHtml($connectionServer) ?>" target="_blank"><?= escapeHtml($connectionServerTitle) ?></a></b> as <b><?= escapeHtml($connectionUser) ?></b></p>
+        <button id="reconnect-button" type="button">Reconnect</button>
+        <span id="reconnect-status" aria-live="polite"></span>
 
         <h2>playing now...</h2>
 
@@ -249,6 +251,25 @@
                     console.error('Could not update now-playing info:', error);
                 }
             }
+
+            document.getElementById('reconnect-button').addEventListener('click', async (event) => {
+                const button = event.currentTarget;
+                const status = document.getElementById('reconnect-status');
+                button.disabled = true;
+                status.textContent = 'Requesting check...';
+                try {
+                    const response = await fetch('reconnect.php', { method: 'POST' });
+                    if (!response.ok) {
+                        throw new Error(`Request failed: ${response.status}`);
+                    }
+                    status.textContent = 'Check requested.';
+                } catch (error) {
+                    status.textContent = 'Could not request a check.';
+                    console.error('Could not request a reconnect:', error);
+                } finally {
+                    button.disabled = false;
+                }
+            });
 
             updateNowPlaying();
             setInterval(updateNowPlaying, 500);

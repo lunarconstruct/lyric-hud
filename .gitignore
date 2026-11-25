@@ -2,3 +2,5 @@ credentials.py
 credentials.json
 .venv/
 __pycache__/
+web_state.json
+reconnect.request

@@ -7,25 +7,6 @@ python is new to me and so is working with most physical hardware like microcont
 
 ---
 
-## server configuration
-
-Create `server/credentials.json` with your Navidrome server URL and Subsonic API parameters:
-
-```json
-{
-  "url": "https://your-navidrome-server/rest/",
-  "params": {
-    "u": "your-username",
-    "p": "your-password-or-token",
-    "v": "your-subsonic-api-version",
-    "c": "lyric-hud",
-    "f": "json"
-  }
-}
-```
-
-This file is gitignored because it contains credentials.
-
 ## hardware
 plans are for this to be built with:
 - ESP32 microcontroller
@@ -37,7 +18,18 @@ plans are for this to be built with:
 
 ---
 
-#### credits and libraries?
-- [micropython-ssd1322 by rdagger](https://github.com/rdagger/micropython-ssd1322)
-- [lyriq by tn3w](https://github.com/tn3w/lyriq)
-- [pykakasi by miurahr](https://github.com/miurahr/pykakasi)
+## Credits and libraries
+
+### Python server
+- [Cutlet](https://github.com/polm/cutlet) for Japanese romanization
+- [fugashi](https://github.com/polm/fugashi) and [unidic-lite](https://github.com/polm/unidic-lite) for Japanese tokenization and dictionary data
+- [jaconv](https://github.com/ikegami-yukino/jaconv) for kana conversion
+- [korean-romanizer](https://github.com/osori/korean-romanizer) for Korean romanization
+- [langdetect](https://github.com/Mimino666/langdetect) for lyric language detection
+- [Requests](https://github.com/psf/requests) for Navidrome API requests
+- [PyYAML](https://github.com/yaml/pyyaml) for settings files
+- [lyriq by TN3W](https://github.com/tn3w/lyriq) for LRCLIB lyrics
+
+### ESP32
+- [micropython-ssd1322 by rdagger](https://github.com/rdagger/micropython-ssd1322) for the OLED display driver
+- [MicroPython aioble by Jim Mussared](https://github.com/micropython/micropython-lib/tree/master/micropython/bluetooth/aioble) for Bluetooth LE support

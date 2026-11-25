@@ -1,20 +1,14 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 
-$state = [
-    'status' => 'waiting',
-    'title' => '',
-    'artist' => '',
-    'current_line' => '',
-    'lyrics' => '',
-    'previous_line1' => '',
-    'previous_line2' => '',
-    'current_line1' => '-- waiting for a song... --',
-    'current_line2' => '',
-    'next_line1' => '',
-    'next_line2' => '',
-    'lyrics' => '',
-];
+$defaultsContents = file_get_contents(__DIR__ . '/default_state.json');
+if ($defaultsContents === false) {
+    throw new RuntimeException('Could not read default web state.');
+}
+$state = json_decode($defaultsContents, true, 512, JSON_THROW_ON_ERROR);
+if (!is_array($state)) {
+    throw new RuntimeException('Default web state must be a JSON object.');
+}
 $statePath = __DIR__ . '/web_state.json';
 
 if (is_file($statePath)) {
