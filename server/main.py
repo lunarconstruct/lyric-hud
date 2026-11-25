@@ -3,6 +3,7 @@ import json
 import os
 import time # used to sleep between polling the navidrome api for the current track and lyrics
 import requests # used to make HTTP requests to the navidrome api to get the current track and lyrics
+import traceback
 
 ## third-party libraries
 from bisect import bisect_right # used to find the index of the current lyric line based on the current playback time
@@ -12,13 +13,16 @@ from functions import (
     introduceSong,
     publish_web_state,
     refresh_web_settings,
-    setSongInfo,
+    pullSongInfo,
     settings,
+    clearUI,
 )
 from lang_func import (
     convert_lyric_line,
     detect_lyric_language,
     get_formatted_lines,
+    contains_japanese,
+    contains_hangul
 )
 from display import TerminalDisplay
 
@@ -34,7 +38,7 @@ def main():
     # create the display object
     display = TerminalDisplay()
     # initialize the web ui state
-    publish_web_state(status="waiting", title="", artist="", current_line1="", current_line2="", next_line1="", next_line2="", lyrics="")
+    publish_web_state(status="waiting", title="", artist="", current_line1="-- waiting for a song... --", current_line2="", next_line1="", next_line2="", lyrics="")
 
     # initialize the current track ID to None so we can detect when a new song starts
     current_track_id = None
@@ -50,38 +54,25 @@ def main():
             nowPlaying = getNowPlaying.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
 
             # assign track info to variables for easier access
-            track, track_id, position_ms, listenState = setSongInfo(nowPlaying)
-            publish_web_state(status=listenState)
+            track, track_id, position_ms, listenState, song_name, artist_name = pullSongInfo(nowPlaying)
 
             # stop/pause/empty check
             if listenState != "playing":
                 if current_track_id is not None:
-                    msg = "-- nothing is playing --" if listenState == "empty" else "-- music stopped --"
-                    display.printText(0, 0, msg, gs=15)
+                    leaveMsg = "-- nothing is playing --" if listenState == "empty" else "-- music stopped --"
+                    clearUI(leaveMsg, display)
                     current_track_id = None
-                    publish_web_state(title="", artist="", current_line1="", current_line2="", next_line1="", next_line2="", lyrics="")
                 time.sleep(.25)
                 continue
 
             # if the track ID that gets pulled from the API is different from the current track ID,
             if track_id != current_track_id:
+
                 poll_time = time.monotonic() # note what time we polled the API
+
                 # fetch the info for the new track and update the current track ID
-                current_track_id, timed_lyrics, lyrics_text, lyrics_lang = introduceSong(track, track_id, display, url, params)
-                # also push the track info to the web ui
-                publish_web_state(
-                    status="playing",
-                    title=track.get("title", "Unknown"),
-                    artist=track.get("artist", "Unknown"),
-                    previous_line1="",
-                    previous_line2="",
-                    current_line1=f"{track.get("title", "Unknown")} - {track.get("artist", "Unknown")}",
-                    current_line2="" if timed_lyrics else "no synced lyrics",
-                    next_line1="",
-                    next_line2="",
-                    lyrics=lyrics_text or "",
-                )
-                
+                current_track_id, timed_lyrics, lyrics_text, lyrics_lang = introduceSong(track, track_id, song_name, artist_name, display, url, params)
+
                 # Re-check position right after fetching lyrics in case the client updated it
                 post_fetch = requests.get(f"{url}getNowPlaying", params=params, timeout=5).json()
                 post_entry = post_fetch.get("subsonic-response", {}).get("nowPlaying", {}).get("entry", [])
@@ -179,10 +170,10 @@ def main():
             # Brief pause at the end of a song before polling for the next track
             time.sleep(.25)
             
-
-        except Exception as e: # catch any errors that occur during the main loop and print them to the console
+        except Exception as e:
             print(f"Polling error: {e}")
-            time.sleep(3)
+            traceback.print_exc()
+            time.sleep(.25)
 
 
 # actually run the code lol

@@ -79,7 +79,7 @@ body {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    font-size: 18px;
+    font-size: 24px;
     font-weight: bold;
     margin: 10px;
     padding: 10px;
@@ -91,10 +91,10 @@ body {
 #previous-line, #next-line {
     color: var(--text);
     opacity: 50%;
-    font-size: 14px;
+    font-size: 16px;
     .line-2 {
     margin-top: 4px;
-    font-size: 12px;
+    font-size: 14px;
 }
 }
 
@@ -105,7 +105,7 @@ body {
 
 .line-2 {
     margin-top: 4px;
-    font-size: 16px;
+    font-size: 18px;
 }
 
 .line-2:empty {

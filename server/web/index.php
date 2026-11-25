@@ -16,7 +16,7 @@
     ];
 
     // path to the settings file
-    $settingsPath = __DIR__ . '/../web_settings.json';
+    $settingsPath = __DIR__ . '/web_settings.json';
     $settingsSaved = false;
 
     // default settings
@@ -81,7 +81,7 @@
         'lyrics' => '',
     ];
     // path to the state file
-    $statePath = __DIR__ . '/../web_state.json';
+    $statePath = __DIR__ . '/web_state.json';
 
     // load the saved state if it exists
     if (is_file($statePath)) {
@@ -128,15 +128,23 @@
 ?>
 
 <html>
+
     <head>
+        
         <link rel="stylesheet" href="style.css">
+
     </head>
+
     <body>
+
         <h1>lyric-hud web ui</h1>
+
         <h2>connection info</h2>
+
         <p id="server-info">connected to <b><a href="<?= escapeHtml($connectionServer) ?>" target="_blank"><?= escapeHtml($connectionServerTitle) ?></a></b> as <b><?= escapeHtml($connectionUser) ?></b></p>
 
         <h2>playing now...</h2>
+
         <h4 id="now-playing"><?= escapeHtml($state['title'] ?: 'Nothing playing') ?> - <?= escapeHtml($state['artist']) ?></h4>
         <p id="playback-status">Status: <?= escapeHtml($state['status']) ?></p>
 

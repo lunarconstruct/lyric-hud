@@ -7,21 +7,14 @@ from lang_func import settings, LYRIC_LANGUAGE_FORMATS
 from lib.lyriq import get_lyrics, Lyrics # used to fetch lyrics from the lrclib and parse them into a Lyrics object
 import requests # used to make HTTP requests to the navidrome api to get the current track and lyrics
 
-
-
 ## global variables
-WEB_STATE_PATH = os.path.join(os.path.dirname(__file__), "web_state.json") # stores the current state for the web ui
-WEB_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "web_settings.json") # stores the current settings from the web ui
+WEB_STATE_PATH = os.path.join(os.path.dirname(__file__), "web/web_state.json") # stores the current state for the web ui
+WEB_SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "web/web_settings.json") # stores the current settings from the web ui
 # default web state, will be updated by the publish_web_state function
-web_state = {
-    "status": "waiting",
-    "title": "",
-    "artist": "",
-    "current_line": "",
-    "lyrics": "",
-}
+web_state = {}
 
 def publish_web_state(**updates):
+    """ push the current application state to the web ui state file """
     if not any(web_state.get(key) != value for key, value in updates.items()):
         return
 
@@ -33,6 +26,7 @@ def publish_web_state(**updates):
 
 
 def refresh_web_settings():
+    """ check for changes in the settings defined on the website """
     if not os.path.isfile(WEB_SETTINGS_PATH):
         return
 
@@ -52,53 +46,61 @@ def refresh_web_settings():
             raise ValueError(f"Invalid {key} in web settings")
         setattr(settings, key, value)
 
-def setSongInfo(nowPlaying):
+def clearUI(leaveMsg, display):
+    """ clears text from the screen and web state, and leaves behind a message if desired. """
+    display.printText(0, 0, leaveMsg, gs=15)
+    publish_web_state(
+        title="",
+        artist="",
+        previous_line1="",
+        previous_line2="",
+        current_line1=leaveMsg,
+        current_line2="",
+        next_line1="",
+        next_line2="",
+        lyrics=""
+    )
+
+def pullSongInfo(nowPlaying):
+    """ fetch the info for the new track and update the web state """
+    # if we're not playing anything yet, use placeholders and stop running the function.
     if not nowPlaying:
-        return None, None, 0, "empty"
+        return None, None, 0, "empty", "", ""
         
+    # collect information on what is currently playing
     track = nowPlaying[0]
     track_id = track.get("id")
     position_ms = track.get("positionMs", 0)
     listenState = track.get("state", "stopped")
+    song_name = track.get("title", "Unknown")
+    artist_name = track.get("artist", "Unknown")
 
-    return track, track_id, position_ms, listenState
+    # post the grabbed information to the web state file
+    publish_web_state(
+        status=listenState,
+        title=song_name,
+        artist=artist_name
+    )
 
-def introduceSong(track, track_id, display, url, params):
-    current_track_id = track_id # update the current track ID to the new track ID
-    lyrics = None
-    timed_lyrics = []
-    lyrics_text = ""
-    lyrics_lang = None
-    
-    display.printText(0, 0, "-- loading next... --", gs=15)
-    song_name = track.get("title", "Unknown") # get the song name from the API response, "unknown" by default
-    artist_name = track.get("artist", "Unknown") # get the artist name from the API response, "unknown" by default
-                    
-    # ask navidrome for the lyrics of the current track using the track ID
+    # expose the variables we set above
+    return track, track_id, position_ms, listenState or "empty", song_name, artist_name
+
+def pullLyrics(track_id, url, params, display):
     try:
-        getSubsonicLyrics = requests.get(
-            f"{url}getLyricsBySongId?id={track_id}", params=params, timeout=5
-        ).json()
+        getSubsonicLyrics = requests.get(f"{url}getLyricsBySongId?id={track_id}", params=params, timeout=5).json()
     except requests.exceptions.JSONDecodeError as error:
         print(f"Navidrome returned invalid lyrics JSON; falling back to LRCLIB: {error}")
         getSubsonicLyrics = {}
     subsonicLyrics = (getSubsonicLyrics.get("subsonic-response", {}).get("lyricsList", {}).get("structuredLyrics", []))
 
-    # display the song name and artist name on the screen
-    display.printText(0, 0, "------------------------", gs=15)
-    display.printText(0, 0, f"{song_name} - {artist_name}", gs=15)
-
     # if navidrome provided lyrics, use them.
     if subsonicLyrics:
+        lyrics_from = "navidrome"
         # get lyric data from the API response and detect the language of the lyrics
         lyric_track = subsonicLyrics[0]
         lines = lyric_track.get("line", [])
         lyrics_text = "\n".join(item.get("value", "") for item in lines)
         lyrics_lang = detect(lyrics_text)
-
-        # display the source of the lyrics and the detected language
-        display.printText(0, 0, f"lyrics provided by navidrome | language: {lyrics_lang}", gs=15)
-        display.printText(0, 0, "------------------------", gs=15)
 
         # if there are synced lyrics
         if lyric_track.get("synced"):
@@ -111,13 +113,47 @@ def introduceSong(track, track_id, display, url, params):
             display.printText(0, 0, lyrics_text, gs=15)
     
     else: # if navidrome did not provide lyrics, pull from lrclib
-        display.printText(0, 0, "lyrics provided by lrclib", gs=15)
+        lyrics_from = "lrclib"
         lyrics_obj = get_lyrics(song_name, artist_name)
         timed_lyrics, lyrics_text = parse_lyriq_obj(lyrics_obj)
-        lyrics_lang = detect(lyrics_text) if lyrics_text and lyrics_text != "lyrics not found :(" else None
+        lyrics_lang = detect(lyrics_text) if lyrics_text and lyrics_text != "unknown" else None
+    
+    return timed_lyrics, lyrics_text, lyrics_from
 
-        if not timed_lyrics:
-            display.printText(0, 0, lyrics_text, gs=15)
+def introduceSong(track, track_id, song_name, artist_name, display, url, params):
+    """ format song information for displaying on screen and web ui """
+    
+    display.printText(0, 0, "-- loading next... --", gs=15)
+
+    current_track_id = track_id # update the current track ID to the new track ID
+
+    lyrics = None
+    timed_lyrics = []
+    lyrics_text = ""
+    lyrics_lang = None
+
+    # ask navidrome for the lyrics of the current track using the track ID
+    timed_lyrics, lyrics_text, lyrics_from = pullLyrics(track_id, url, params, display)
+             
+    # display the song name and artist name on the screen
+    display.printText(0, 0, "------------------------", gs=15)
+    display.printText(0, 0, f"{song_name} - {artist_name}", gs=15)
+
+    # display the source of the lyrics and the detected language
+    display.printText(0, 0, f"lyrics provided by {lyrics_from} | language: {lyrics_lang}", gs=15)
+    display.printText(0, 0, "------------------------", gs=15)
+
+    # also push the track info to the web ui
+    publish_web_state(
+        status="playing",
+        previous_line1="synced lyrics available :)" if timed_lyrics else "no synced lyrics :(",
+        previous_line2="",
+        current_line1=f"{song_name} - {artist_name}",
+        current_line2="" if lyrics_lang not in ("ja", "ko") else f"{get_formatted_lines(song_name, lyrics_lang, settings)[1]} - {get_formatted_lines(artist_name, lyrics_lang, settings)[1]}",
+        next_line1=f"lyrics provided by {lyrics_from} | language: {lyrics_lang}" if timed_lyrics else "no synced lyrics",
+        next_line2="",
+        lyrics=lyrics_text or "",
+    )
 
     return current_track_id, timed_lyrics or [], lyrics_text, lyrics_lang
 
@@ -146,4 +182,4 @@ def nav2lrc(lines):
 
     lrc_string = "\n".join(lrc_lines)
     lyrics_obj = Lyrics.from_lrc_string(lrc_string, none_char="♪")
-    return parse_lyriq_obj(lyrics_obj)
+    return parse_lyriq_obj(lyrics_obj) 

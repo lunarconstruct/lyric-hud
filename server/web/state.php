@@ -7,8 +7,15 @@ $state = [
     'artist' => '',
     'current_line' => '',
     'lyrics' => '',
+    'previous_line1' => '',
+    'previous_line2' => '',
+    'current_line1' => '-- waiting for a song... --',
+    'current_line2' => '',
+    'next_line1' => '',
+    'next_line2' => '',
+    'lyrics' => '',
 ];
-$statePath = __DIR__ . '/../web_state.json';
+$statePath = __DIR__ . '/web_state.json';
 
 if (is_file($statePath)) {
     $contents = file_get_contents($statePath);
