@@ -86,7 +86,6 @@ body {
     border: 1px solid var(--pink);
     border-radius: 10px;
     background-color: var(--mantle);
-    width: 75vw;
 }
 
 #previous-line, #next-line {
