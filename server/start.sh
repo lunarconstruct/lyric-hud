@@ -17,10 +17,10 @@ if ! command -v php >/dev/null 2>&1; then
     exit 1
 fi
 
-printf 'Serving lyric-hud at http://localhost:8000\n'
+printf 'Serving lyric-hud at http://0.0.0.0:8000\n'
 printf 'PHP server output is being written to %s\n' "$php_log"
 
-XDEBUG_MODE=off php -S localhost:8000 -t "$web_dir" >"$php_log" 2>&1 &
+XDEBUG_MODE=off php -S 0.0.0.0:8000 -t "$web_dir" >"$php_log" 2>&1 &
 php_pid=$!
 
 cleanup() {
