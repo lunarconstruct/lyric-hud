@@ -9,20 +9,9 @@ import traceback
 from bisect import bisect_right # used to find the index of the current lyric line based on the current playback time
 
 ## my modules
-from functions import (
-    initialize_web_state,
-    introduceSong,
-    publish_web_state,
-    refresh_web_settings,
-    pullSongInfo,
-    clearUI,
-    wait_for_reconnect,
-)
-from lang_func import (
-    get_formatted_lines,
-    settings,
-)
-from display import TerminalDisplay
+import functions as f # general functions, accessed with a "f." prefix
+import lang_func as lf # language functions, accessed with a "lf." prefix
+from display import TerminalDisplay # class for the display
 
 with open(os.path.join(os.path.dirname(__file__), "credentials.json"), "r", encoding="utf-8") as credentials_file:
     credentials = json.load(credentials_file)
@@ -46,7 +35,7 @@ def main():
     # create the display object
     display = TerminalDisplay()
     # initialize the web ui state
-    initialize_web_state()
+    f.initialize_web_state()
 
     # initialize the current track ID to None so we can detect when a new song starts
     current_track_id = None
@@ -61,7 +50,7 @@ def main():
             nowPlaying = get_now_playing_entries()
 
             # assign track info to variables for easier access
-            track, track_id, position_ms, listenState, song_name, artist_name = pullSongInfo(nowPlaying)
+            track, track_id, position_ms, listenState, song_name, artist_name = f.pullSongInfo(nowPlaying)
             if nowPlaying:
                 retry_interval = 1
 
@@ -72,16 +61,16 @@ def main():
                     if listenState == "paused":
                         display.printText(0, 0, "-- music paused --", gs=15)
                     else:
-                        clearUI(leaveMsg, display, status="waiting" if listenState == "empty" else listenState)
+                        f.clearUI(leaveMsg, display, status="waiting" if listenState == "empty" else listenState)
                     current_track_id = None
 
                 if listenState == "empty":
-                    if wait_for_reconnect(retry_interval):
+                    if f.wait_for_reconnect(retry_interval):
                         retry_interval = 1
                     else:
                         retry_interval = min(retry_interval * 2, max_retry_interval)
                 else:
-                    wait_for_reconnect(.25)
+                    f.wait_for_reconnect(.25)
                 continue
 
             # if the track ID that gets pulled from the API is different from the current track ID,
@@ -90,7 +79,7 @@ def main():
                 poll_time = time.monotonic() # note what time we polled the API
 
                 # fetch the info for the new track and update the current track ID
-                current_track_id, timed_lyrics, lyrics_text, lyrics_lang = introduceSong(track_id, song_name, artist_name, display, url, params)
+                current_track_id, timed_lyrics, lyrics_text, lyrics_lang = f.introduceSong(track_id, song_name, artist_name, display, url, params)
 
                 # Re-check position right after fetching lyrics in case the client updated it
                 post_entry = get_now_playing_entries()
@@ -125,7 +114,7 @@ def main():
                         time.sleep(min(wait_time, playback_poll_interval))
                         active_entries = get_now_playing_entries()
                         if not active_entries:
-                            clearUI("-- nothing is playing --", display, status="waiting")
+                            f.clearUI("-- nothing is playing --", display, status="waiting")
                             current_track_id = None
                             playback_interrupted = True
                             break
@@ -133,11 +122,11 @@ def main():
                         active_track = active_entries[0]
                         active_state = active_track.get("state", "stopped")
                         if active_track.get("id") != current_track_id or active_state != "playing":
-                            pullSongInfo(active_entries)
+                            f.pullSongInfo(active_entries)
                             if active_state == "paused":
                                 display.printText(0, 0, "-- music paused --", gs=15)
                             elif active_state != "playing":
-                                clearUI("-- music stopped --", display, status=active_state)
+                                f.clearUI("-- music stopped --", display, status=active_state)
                             current_track_id = None
                             playback_interrupted = True
                             break
@@ -146,15 +135,15 @@ def main():
                         break
 
                     # Check for updated settings once per lyric line
-                    refresh_web_settings()
+                    f.refresh_web_settings()
 
                     # get and format current line
-                    rendered_line = get_formatted_lines(line, lyrics_lang, settings)
+                    rendered_line = lf.get_formatted_lines(line, lyrics_lang, lf.settings)
 
                     # get and format next line
                     if i + 1 < len(timed_lyrics):
                         _, raw_next_line = timed_lyrics[i + 1]
-                        next_rendered = get_formatted_lines(raw_next_line, lyrics_lang, settings)
+                        next_rendered = lf.get_formatted_lines(raw_next_line, lyrics_lang, lf.settings)
                     else:
                         next_rendered = ("", "")  # Default to blank on the final line of the song
                     
@@ -171,7 +160,7 @@ def main():
                     )
                     
                     # post the lines for the web ui to pull
-                    publish_web_state(
+                    f.publish_web_state(
                         previous_line1=prev1 if prev1 else "",
                         previous_line2=prev2 if prev2 else "",
                         current_line1=line1 if line1 else "",
@@ -191,13 +180,13 @@ def main():
                     if not active_entries or active_entries[0].get("id") != current_track_id or listenState != "playing":
                         if current_track_id is not None: # if the user WAS listening but has now stopped,
                             if listenState == "paused":
-                                pullSongInfo(active_entries)
+                                f.pullSongInfo(active_entries)
                                 display.printText(0, 0, "-- music paused --", gs=15)
                             elif active_entries:
-                                pullSongInfo(active_entries)
-                                clearUI("-- music stopped --", display, status=listenState)
+                                f.pullSongInfo(active_entries)
+                                f.clearUI("-- music stopped --", display, status=listenState)
                             else:
-                                clearUI("-- nothing is playing --", display, status="waiting")
+                                f.clearUI("-- nothing is playing --", display, status="waiting")
                             current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
                         break
 
@@ -212,13 +201,13 @@ def main():
                     if not active_entries or active_entries[0].get("id") != current_track_id or listenState != "playing":
                         if current_track_id is not None: # if the user WAS listening but has now stopped,
                             if listenState == "paused":
-                                pullSongInfo(active_entries)
+                                f.pullSongInfo(active_entries)
                                 display.printText(0, 0, "-- music paused --", gs=15)
                             elif active_entries:
-                                pullSongInfo(active_entries)
-                                clearUI("-- music stopped --", display, status=listenState)
+                                f.pullSongInfo(active_entries)
+                                f.clearUI("-- music stopped --", display, status=listenState)
                             else:
-                                clearUI("-- nothing is playing --", display, status="waiting")
+                                f.clearUI("-- nothing is playing --", display, status="waiting")
                             current_track_id = None # and reset the current track ID to None so we can detect when a new song starts
                         break
 
@@ -230,7 +219,7 @@ def main():
         # if the navidrome API poll fails, retry in diminishing intervals
         except requests.exceptions.RequestException as e:
             print(f"Navidrome request failed; retrying in {retry_interval} seconds: {e}")
-            if wait_for_reconnect(retry_interval):
+            if f.wait_for_reconnect(retry_interval):
                 retry_interval = 1
             else:
                 retry_interval = min(retry_interval * 2, max_retry_interval)
