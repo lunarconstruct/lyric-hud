@@ -39,15 +39,32 @@ html, body {
 }
 
 body {
-    transform: scaleY(-1);
+    
     background-color: #000;
     color: #fff;
     font-size: 24px;
     outline: 1px solid var(--pink);
 }
 
+button {
+    font-size: 20px;
+    font-family: 'SN Pro', sans-serif;
+    background-color: var(--base);
+    color: var(--overlay2);
+    border-radius: 10px;
+    border-color: #11111b;
+    padding: 5px;
+    margin: 5px;
+    position: relative;
+    z-index: 10; /* Places the buttons in front of the lyrics layer */
+}
+
+
+
 #lyrics {
+    transform: scaleY(-1);
     position: fixed;
+    z-index: 1;
     inset: 0;
     display: flex;
     flex-direction: column;

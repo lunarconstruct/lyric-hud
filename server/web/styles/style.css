@@ -31,6 +31,7 @@ html {
     background-color: var(--crust);
     color: var(--text);
     margin: 10px;
+    font-family: 'SN Pro', sans-serif;
 }
 
 a {
@@ -68,10 +69,22 @@ h6 {
 }
 
 body {
-    font-family: 'SN Pro', sans-serif;
     border-radius: 10px;
     padding: 30px;
     background-color: var(--base);
+}
+
+button, form, select, input {
+    font-size: 16px;
+    font-family: 'SN Pro', sans-serif;
+    background-color: var(--base);
+    color: var(--text);
+    border-radius: 10px;
+    border-color: var(--blue);
+    padding: 10px;
+    margin: 5px;
+    position: relative;
+    z-index: 10; /* Places the buttons in front of the lyrics layer */
 }
 
 #lyrics {
@@ -79,7 +92,7 @@ body {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    font-size: 24px;
+    font-size: clamp(1.2rem, 9vmin, 5rem);
     font-weight: bold;
     margin: 10px;
     padding: 10px;
@@ -91,7 +104,7 @@ body {
 #previous-line, #next-line {
     color: var(--text);
     opacity: 50%;
-    font-size: 16px;
+    font-size: clamp(1rem, 5vmin, 3.5rem);;
     .line-2 {
     margin-top: 4px;
     font-size: 14px;
@@ -105,7 +118,7 @@ body {
 
 .line-2 {
     margin-top: 4px;
-    font-size: 18px;
+    font-size: clamp(0.9rem, 7.5vmin, 3rem);
 }
 
 .line-2:empty {

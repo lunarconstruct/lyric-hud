@@ -1,3 +1,9 @@
+<div id="navigation">
+    <a href="/"><button id="standard-mode-button" type="button">standard view</button></a>
+    <a href="/hudmode.php"><button id="hud-mode-button" type="button">phone HUD view</button></a>
+    <a href="/lyriconlymode.php"><button id="lyric-mode-button" type="button">lyrics only view</button></a>
+</div>
+
 <div id="lyrics">
             
     <p id="previous-line">
